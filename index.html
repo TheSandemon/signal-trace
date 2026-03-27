@@ -270,8 +270,14 @@ canvas {
         <div id="phase-fill" style="height:100%; width:100%; background:linear-gradient(90deg,#D4A853,#ffcc66); box-shadow:0 0 8px #D4A85388; transition:width 0.1s;"></div>
       </div>
     </div>
+    <div id="overdrive-wrap" style="position:absolute; left:24px; top:80px; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity 0.3s;">
+      <span id="overdrive-label" style="font-family:'Syncopate',sans-serif; font-size:10px; color:#ff3366; letter-spacing:2px;">OVERDRIVE</span>
+      <div id="overdrive-bar" style="width:140px; height:8px; background:#1a1a1a; border:1px solid #ff336644; border-radius:4px; overflow:hidden;">
+        <div id="overdrive-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#ff3366,#ff6699); box-shadow:0 0 8px #ff336688; transition:width 0.1s;"></div>
+      </div>
+    </div>
   </div>
-  <div id="mode-indicator">MOUSE: MOVE | CLICK: ABSORB | SHIFT: PHASE SHIFT | SPACE: DISCHARGE</div>
+  <div id="mode-indicator">MOUSE: MOVE | CLICK: ABSORB | SHIFT: PHASE SHIFT | SPACE: DISCHARGE | E: OVERDRIVE</div>
 </div>
 
 <div id="start-screen">
@@ -330,6 +336,25 @@ let dischargeActive = false;
 let dischargeTimer = 0;
 let dischargeRadius = 0;
 let dischargeDamage = 0;
+
+// OVERDRIVE system
+let overdriveActive = false;
+let overdriveTimer = 0;
+const overdriveDuration = 5; // seconds
+const overdriveHealthDrain = 8; // per second
+
+// COMBO POPUP floaters
+let comboPopups = [];
+
+// CHAIN LINK system
+let chainLinks = []; // {from: idx, to: idx, life: 1}
+
+// RIFT ZONE
+let riftZone = null;
+let riftZoneTimer = 0;
+
+// CHROMATIC ABERRATION
+let chromaIntensity = 0;
 
 // ====== BOSS STATE ======
 let boss = null;
@@ -422,6 +447,31 @@ function spawnBossAttack(type) {
       life: 12,
       seekerPhase: 0
     });
+  } else if (type === 'laser') {
+    // Laser sweep — telegraph line then damage beam
+    const angle = Math.atan2(signal.y - boss.y, signal.x - boss.x);
+    bossAttacks.push({
+      type: 'laser',
+      angle: angle,
+      life: 3,
+      maxLife: 3,
+      width: 40,
+      warning: 1.5
+    });
+  } else if (type === 'mine') {
+    // Homing mine — spawns and sits, then homes in
+    const angle = Math.random() * Math.PI * 2;
+    const dist = boss.radius * 1.5;
+    bossAttacks.push({
+      x: boss.x + Math.cos(angle) * dist,
+      y: boss.y + Math.sin(angle) * dist,
+      vx: 0, vy: 0,
+      radius: 10,
+      type: 'mine',
+      life: 8,
+      phase: 0,
+      armingTime: 2
+    });
   }
 }
 
@@ -448,17 +498,31 @@ function updateBoss(dt) {
   // Boss attacks
   boss.attackTimer -= dt;
   if (boss.attackTimer <= 0 && !boss.defeated) {
-    boss.attackPattern = (boss.attackPattern + 1) % 3;
+    boss.attackPattern = (boss.attackPattern + 1) % 5;
     if (boss.attackPattern === 0) spawnBossAttack('ring');
     else if (boss.attackPattern === 1) spawnBossAttack('spiral');
-    else spawnBossAttack('seeker');
+    else if (boss.attackPattern === 2) spawnBossAttack('seeker');
+    else if (boss.attackPattern === 3) spawnBossAttack('laser');
+    else spawnBossAttack('mine');
     boss.attackTimer = 2.5 - Math.min(wave * 0.1, 1.2);
   }
 
   // Update boss attacks
   for (let a of bossAttacks) {
-    a.x += a.vx * dt * 60;
-    a.y += a.vy * dt * 60;
+    if (a.type !== 'laser') {
+      a.x += a.vx * dt * 60;
+      a.y += a.vy * dt * 60;
+    } else {
+      // Laser tracks signal slowly
+      if (a.warning > 0) {
+        a.warning -= dt;
+        const targetAngle = Math.atan2(signal.y - boss.y, signal.x - boss.x);
+        let diff = targetAngle - a.angle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        a.angle += diff * dt * 1.5;
+      }
+    }
     a.life -= dt;
     if (a.type === 'seeker') {
       a.seekerPhase += dt;
@@ -471,6 +535,23 @@ function updateBoss(dt) {
       const newAngle = currentAngle + turn;
       a.vx = Math.cos(newAngle) * speed;
       a.vy = Math.sin(newAngle) * speed;
+    }
+    if (a.type === 'mine') {
+      a.phase += dt;
+      if (a.armingTime > 0) {
+        a.armingTime -= dt;
+      } else {
+        // Slow homing after arming
+        const targetAngle = Math.atan2(signal.y - a.y, signal.x - a.x);
+        const currentAngle = Math.atan2(a.vy, a.vx);
+        const diff = targetAngle - currentAngle;
+        const turn = Math.atan2(Math.sin(diff), Math.cos(diff)) * 0.015;
+        const speed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
+        const newAngle = currentAngle + turn;
+        const spd = Math.min(speed + dt * 0.3, 2.5);
+        a.vx = Math.cos(newAngle) * spd;
+        a.vy = Math.sin(newAngle) * spd;
+      }
     }
     // Wall bounce for ring/spiral
     if ((a.type === 'ring' || a.type === 'spiral') && a.life > 0) {
@@ -498,14 +579,27 @@ function updateBoss(dt) {
   // Collision: boss attacks vs signal
   for (let a of bossAttacks) {
     if (!signal.isFragmented && !phaseActive) {
-      const dx = signal.x - a.x, dy = signal.y - a.y;
-      if (Math.sqrt(dx*dx + dy*dy) < signal.radius + a.radius) {
+      let hit = false;
+      if (a.type === 'laser') {
+        // Laser collision: check if signal is within angle + width of laser
+        const angleToSignal = Math.atan2(signal.y - boss.y, signal.x - boss.x);
+        let diff = angleToSignal - a.angle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const distToBoss = Math.sqrt((signal.x - boss.x)**2 + (signal.y - boss.y)**2);
+        if (Math.abs(diff) < a.width / distToBoss && a.warning <= 0 && distToBoss < 800) hit = true;
+      } else {
+        const dx = signal.x - a.x, dy = signal.y - a.y;
+        hit = Math.sqrt(dx*dx + dy*dy) < signal.radius + a.radius;
+      }
+      if (hit) {
         // Fragment!
         health -= 20;
         combo = 0;
         screenShake = 12;
         flashColor = '#ff3366';
         flashAlpha = 0.35;
+        chromaIntensity = 0.4;
         spawnParticles(signal.x, signal.y, '#ff3366', 25, 4, 0.7);
         const fragCount = 5 + Math.floor(Math.random() * 3);
         signal.fragments = [];
@@ -543,7 +637,7 @@ function updateBoss(dt) {
         spawnParticles(boss.x + (Math.random()-0.5)*100, boss.y + (Math.random()-0.5)*100, '#ff3366', 30, 5, 0.8);
       }, i * 100);
     }
-    score += 500 + wave * 100;
+    score += (500 + wave * 100) * (overdriveActive ? 2 : 1);
     health = 100;
     flashColor = '#D4A853';
     flashAlpha = 0.6;
@@ -652,6 +746,67 @@ function drawBoss() {
 
   // Draw boss attacks
   for (let a of bossAttacks) {
+    if (a.type === 'laser') {
+      // Draw laser line from boss
+      const laserAlpha = a.warning > 0 ? (1 - a.warning / 1.5) * 0.5 : 0.8;
+      const laserColor = a.warning > 0 ? '#ff336644' : '#ff3366';
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.rotate(a.angle);
+      // Warning or active beam
+      if (a.warning > 0) {
+        ctx.strokeStyle = `rgba(255, 51, 102, ${laserAlpha})`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 10]);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(800, 0);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Active beam
+        ctx.shadowColor = '#ff3366';
+        ctx.shadowBlur = 30;
+        ctx.strokeStyle = `rgba(255, 51, 102, ${laserAlpha})`;
+        ctx.lineWidth = a.width;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(800, 0);
+        ctx.stroke();
+        // Core line
+        ctx.strokeStyle = `rgba(255, 200, 220, ${laserAlpha * 0.8})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(800, 0);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.shadowBlur = 0;
+      continue;
+    }
+    if (a.type === 'mine') {
+      const mineColor = a.armingTime > 0 ? '#ffaa00' : '#ff3366';
+      const pulse = Math.sin(a.phase * 8) * 0.3 + 0.7;
+      ctx.shadowColor = mineColor;
+      ctx.shadowBlur = 15 + (a.armingTime > 0 ? 0 : Math.sin(a.phase * 10) * 10);
+      ctx.strokeStyle = mineColor;
+      ctx.lineWidth = 2;
+      // Octagon shape
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2 + a.phase * 2;
+        const r = a.radius * pulse;
+        const px = a.x + Math.cos(ang) * r, py = a.y + Math.sin(ang) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255, 51, 102, ${0.2 * pulse})`;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      continue;
+    }
     ctx.shadowColor = a.type === 'seeker' ? '#D4A853' : '#ff3366';
     ctx.shadowBlur = 15;
     ctx.strokeStyle = a.type === 'seeker' ? '#D4A853' : '#ff3366';
@@ -786,6 +941,87 @@ function spawnNode() {
 let blocks = [];
 let blockSpawnTimer = 0;
 
+// ====== RIFT ZONE ======
+function spawnRiftZone() {
+  const margin = 150;
+  riftZone = {
+    x: margin + Math.random() * (W - margin * 2),
+    y: margin + Math.random() * (H - margin * 2),
+    radius: 80 + Math.random() * 60,
+    life: 12,
+    phase: 0,
+    pulsePhase: 0
+  };
+  // Spawn a cluster of 5-8 good nodes inside the zone
+  const nodeCount = 5 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < nodeCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * riftZone.radius * 0.7;
+    nodes.push({
+      x: riftZone.x + Math.cos(angle) * dist,
+      y: riftZone.y + Math.sin(angle) * dist,
+      radius: 8 + Math.random() * 6,
+      type: 'good',
+      pulsePhase: Math.random() * Math.PI * 2,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      absorbed: false,
+      absorbAnim: 0
+    });
+  }
+  flashColor = '#D4A853';
+  flashAlpha = 0.2;
+  screenShake = 8;
+}
+
+function updateRiftZone(dt) {
+  if (!riftZone) return;
+  riftZone.life -= dt;
+  riftZone.phase += dt;
+  riftZone.pulsePhase += dt * 3;
+  if (riftZone.life <= 0) riftZone = null;
+}
+
+function drawRiftZone() {
+  if (!riftZone) return;
+  const pulse = Math.sin(riftZone.pulsePhase) * 0.3 + 0.7;
+  const alpha = Math.min(1, riftZone.life) * pulse;
+  // Outer glow ring
+  ctx.strokeStyle = `rgba(212, 168, 83, ${alpha * 0.6})`;
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#D4A853';
+  ctx.shadowBlur = 25;
+  ctx.setLineDash([8, 6]);
+  ctx.beginPath();
+  ctx.arc(riftZone.x, riftZone.y, riftZone.radius * pulse, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Inner fill
+  const grad = ctx.createRadialGradient(riftZone.x, riftZone.y, 0, riftZone.x, riftZone.y, riftZone.radius);
+  grad.addColorStop(0, `rgba(212, 168, 83, ${alpha * 0.12})`);
+  grad.addColorStop(0.7, `rgba(212, 168, 83, ${alpha * 0.06})`);
+  grad.addColorStop(1, 'rgba(212, 168, 83, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(riftZone.x, riftZone.y, riftZone.radius, 0, Math.PI * 2);
+  ctx.fill();
+  // Spinning spokes
+  ctx.save();
+  ctx.translate(riftZone.x, riftZone.y);
+  ctx.rotate(riftZone.phase * 0.5);
+  ctx.strokeStyle = `rgba(212, 168, 83, ${alpha * 0.3})`;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(angle) * riftZone.radius * 0.9, Math.sin(angle) * riftZone.radius * 0.9);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.shadowBlur = 0;
+}
+
 function spawnBlock() {
   const side = Math.floor(Math.random() * 4);
   const size = 20 + Math.random() * 30;
@@ -849,7 +1085,7 @@ canvas.addEventListener('click', e => {
       if (Math.sqrt(dx*dx + dy*dy) < 50) {
         n.absorbed = true;
         n.absorbAnim = 1;
-        score += 10 * (1 + combo * 0.1);
+        score += 10 * (1 + combo * 0.1) * (overdriveActive ? 2 : 1);
         health = Math.min(100, health + 8);
         energy = Math.min(maxEnergy, energy + 8);
         combo++;
@@ -858,6 +1094,10 @@ canvas.addEventListener('click', e => {
         flashColor = '#00ff88';
         flashAlpha = 0.15;
         absorbed = true;
+        // Combo popup
+        if (combo >= 3) {
+          comboPopups.push({ x: n.x, y: n.y, text: `COMBO x${combo}`, life: 1.2, color: '#D4A853' });
+        }
         // Damage boss if near
         if (boss && !boss.defeated) {
           const bx = n.x - boss.x, by = n.y - boss.y;
@@ -867,7 +1107,8 @@ canvas.addEventListener('click', e => {
             energy = Math.min(maxEnergy, energy + 5);
             spawnParticles(n.x, n.y, '#ff3366', 15, 3, 0.5);
             spawnParticles(boss.x + (Math.random()-0.5)*boss.radius, boss.y + (Math.random()-0.5)*boss.radius, '#ff3366', 8, 2, 0.4);
-            score += 5;
+            score += 5 * (overdriveActive ? 2 : 1);
+            if (combo >= 3) comboPopups.push({ x: boss.x, y: boss.y - boss.radius - 20, text: `COMBO x${combo}`, life: 1.2, color: '#ff3366' });
           }
         }
         break;
@@ -900,6 +1141,15 @@ document.addEventListener('keydown', e => {
     flashColor = '#00ccff';
     flashAlpha = 0.3;
     spawnParticles(signal.x, signal.y, '#00ccff', 30, 5, 0.6);
+  }
+  if (e.code === 'KeyE' && !overdriveActive && health > 30) {
+    // OVERDRIVE — double score for 5s, drains health
+    overdriveActive = true;
+    overdriveTimer = overdriveDuration;
+    screenShake = 10;
+    flashColor = '#ff3366';
+    flashAlpha = 0.4;
+    spawnParticles(signal.x, signal.y, '#ff3366', 40, 6, 0.8);
   }
   if (e.code === 'Space' && !dischargeActive && energy >= 30) {
     // DISCHARGE — energy blast
@@ -958,6 +1208,13 @@ function startGame() {
   phaseGhostTrail = [];
   dischargeActive = false;
   dischargeTimer = 0;
+  overdriveActive = false;
+  overdriveTimer = 0;
+  riftZone = null;
+  riftZoneTimer = 15;
+  comboPopups = [];
+  chainLinks = [];
+  chromaIntensity = 0;
   resetSignal();
   generateCircuit();
   if (!audioCtx) initAudio();
@@ -1071,6 +1328,66 @@ function update(dt) {
     energy = Math.max(0, energy - 0.8 * dt);
   }
 
+  // OVERDRIVE update
+  if (overdriveActive) {
+    overdriveTimer -= dt;
+    health -= overdriveHealthDrain * dt;
+    chromaIntensity = 0.3; // persistent chromatic aberration during overdrive
+    if (overdriveTimer <= 0) {
+      overdriveActive = false;
+      overdriveTimer = 0;
+    }
+    // Spawn red overdrive particles
+    if (Math.random() < 0.3) {
+      spawnParticles(signal.x + (Math.random()-0.5)*30, signal.y + (Math.random()-0.5)*30, '#ff3366', 2, 2, 0.5);
+    }
+  }
+
+  // Rift Zone spawning — every 20s if no zone active
+  riftZoneTimer -= dt;
+  if (riftZoneTimer <= 0 && !riftZone) {
+    spawnRiftZone();
+    riftZoneTimer = 20 - Math.min(wave * 0.5, 10);
+  }
+
+  // Chain Link system — fragments near each other form chains
+  chainLinks = [];
+  if (signal.isFragmented && signal.fragments.length >= 2) {
+    const chainDist = 70;
+    for (let i = 0; i < signal.fragments.length; i++) {
+      for (let j = i + 1; j < signal.fragments.length; j++) {
+        const dx = signal.fragments[i].x - signal.fragments[j].x;
+        const dy = signal.fragments[i].y - signal.fragments[j].y;
+        if (Math.sqrt(dx*dx + dy*dy) < chainDist) {
+          chainLinks.push({ from: i, to: j, life: 1 });
+        }
+      }
+    }
+    // Chain bonus: 3+ connected fragments = chain bonus
+    if (chainLinks.length >= 3) {
+      // Count unique nodes in chain
+      const nodesInChain = new Set();
+      chainLinks.forEach(c => { nodesInChain.add(c.from); nodesInChain.add(c.to); });
+      if (nodesInChain.size >= 3) {
+        comboTimer = Math.max(comboTimer, 1.5);
+        combo = Math.max(combo, Math.min(nodesInChain.size, 10));
+        score += dt * 20 * nodesInChain.size * (overdriveActive ? 2 : 1);
+        // Pulse effect
+        if (Math.random() < 0.05) {
+          spawnParticles(signal.x, signal.y, '#D4A853', 10, 3, 0.4);
+        }
+      }
+    }
+  }
+  chainLinks = chainLinks.filter(c => { c.life -= dt; return c.life > 0; });
+
+  // Combo popups update
+  for (let cp of comboPopups) {
+    cp.y -= 40 * dt;
+    cp.life -= dt;
+  }
+  comboPopups = comboPopups.filter(cp => cp.life > 0);
+
   // Health drain (corruption)
   const drainRate = 0.3 + wave * 0.15 + (audioLevel > 0.3 ? -5 : 0.5);
   health -= drainRate * dt;
@@ -1151,6 +1468,7 @@ function update(dt) {
         screenShake = 15;
         flashColor = '#ff3366';
         flashAlpha = 0.4;
+        chromaIntensity = 0.5;
         spawnParticles(signal.x, signal.y, '#ff3366', 30, 5, 0.8);
 
         // Break signal into fragments
@@ -1218,6 +1536,7 @@ function update(dt) {
 
   updateUI();
   updateBoss(dt);
+  updateRiftZone(dt);
 }
 
 function updateUI() {
@@ -1246,6 +1565,19 @@ function updateUI() {
   const phaseWrap = document.getElementById('phase-cooldown-wrap');
   if (phaseReady || phaseActive) phaseWrap.classList.add('active');
   else phaseWrap.classList.remove('active');
+
+  // Overdrive bar
+  const odWrap = document.getElementById('overdrive-wrap');
+  if (overdriveActive) {
+    odWrap.style.opacity = '1';
+    document.getElementById('overdrive-fill').style.width = `${(overdriveTimer / overdriveDuration) * 100}%`;
+    document.getElementById('score-display').style.color = '#ff3366';
+    document.getElementById('score-display').style.textShadow = '0 0 20px #ff336688';
+  } else {
+    odWrap.style.opacity = '0';
+    document.getElementById('score-display').style.color = '#D4A853';
+    document.getElementById('score-display').style.textShadow = '0 0 20px #D4A85388';
+  }
 }
 
 // ====== DRAW ======
@@ -1262,6 +1594,9 @@ function draw() {
 
   ctx.save();
   ctx.translate(sx, sy);
+
+  // Rift Zone (behind everything)
+  drawRiftZone();
 
   // Circuit background
   const audioLevel = audioActive ? audioData.reduce((a, b) => a + b, 0) / audioData.length / 255 : 0;
@@ -1535,6 +1870,36 @@ function draw() {
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
 
+  // Chain links between fragments
+  for (let c of chainLinks) {
+    const f1 = signal.fragments[c.from];
+    const f2 = signal.fragments[c.to];
+    if (!f1 || !f2) continue;
+    const pulse = Math.sin(Date.now() * 0.01) * 0.3 + 0.7;
+    ctx.strokeStyle = `rgba(212, 168, 83, ${c.life * pulse * 0.8})`;
+    ctx.lineWidth = 1.5 + pulse;
+    ctx.shadowColor = '#D4A853';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(f1.x, f1.y);
+    ctx.lineTo(f2.x, f2.y);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // Combo popups
+  ctx.font = 'bold 16px Syncopate, sans-serif';
+  ctx.textAlign = 'center';
+  for (let cp of comboPopups) {
+    ctx.globalAlpha = cp.life / 1.2;
+    ctx.fillStyle = cp.color;
+    ctx.shadowColor = cp.color;
+    ctx.shadowBlur = 15;
+    ctx.fillText(cp.text, cp.x, cp.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+
   // Glitch slices
   for (let s of glitchSlices) {
     ctx.save();
@@ -1546,6 +1911,20 @@ function draw() {
 
   // Boss
   drawBoss();
+
+  // Chromatic aberration (RGB channel split on damage/overdrive)
+  if (chromaIntensity > 0.01) {
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const copy = ctx.getImageData(0, 0, W, H);
+    const offset = Math.floor(chromaIntensity * 8);
+    ctx.putImageData(imgData, offset, 0);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.15;
+    ctx.putImageData(copy, -offset, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    chromaIntensity *= 0.92; // decay
+  }
 
   ctx.restore();
 }
