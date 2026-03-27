@@ -227,6 +227,12 @@ canvas {
 #boss-hud {
   transition: opacity 0.5s;
 }
+#energy-bar-wrap, #phase-cooldown-wrap {
+  opacity: 0.7;
+}
+#energy-bar-wrap.active, #phase-cooldown-wrap.active {
+  opacity: 1;
+}
 </style>
 </head>
 <body>
@@ -251,8 +257,21 @@ canvas {
       <div id="health-bar"><div id="health-fill"></div></div>
       <span id="signal-integrity">100%</span>
     </div>
+    <div id="energy-bar-wrap" style="position:absolute; left:24px; top:58px; display:flex; align-items:center; gap:8px;">
+      <span id="energy-label" style="font-family:'Syncopate',sans-serif; font-size:10px; color:#00ccff; letter-spacing:2px;">ENERGY</span>
+      <div id="energy-bar" style="width:140px; height:8px; background:#1a1a1a; border:1px solid #00ccff44; border-radius:4px; overflow:hidden;">
+        <div id="energy-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#00ccff,#00ffff); box-shadow:0 0 8px #00ccff88; transition:width 0.15s ease;"></div>
+      </div>
+      <span id="energy-pct" style="font-family:'Space Mono',monospace; font-size:10px; color:#00ccff88; letter-spacing:1px;">0%</span>
+    </div>
+    <div id="phase-cooldown-wrap" style="position:absolute; right:24px; top:58px; display:flex; align-items:center; gap:8px;">
+      <span id="phase-label" style="font-family:'Syncopate',sans-serif; font-size:10px; color:#D4A853; letter-spacing:2px;">PHASE</span>
+      <div id="phase-bar" style="width:80px; height:8px; background:#1a1a1a; border:1px solid #D4A85344; border-radius:4px; overflow:hidden;">
+        <div id="phase-fill" style="height:100%; width:100%; background:linear-gradient(90deg,#D4A853,#ffcc66); box-shadow:0 0 8px #D4A85388; transition:width 0.1s;"></div>
+      </div>
+    </div>
   </div>
-  <div id="mode-indicator">MOUSE: MOVE SIGNAL | CLICK: ABSORB NODE</div>
+  <div id="mode-indicator">MOUSE: MOVE | CLICK: ABSORB | SHIFT: PHASE SHIFT | SPACE: DISCHARGE</div>
 </div>
 
 <div id="start-screen">
@@ -298,6 +317,19 @@ let audioCtx = null;
 let analyser = null;
 let audioData = new Uint8Array(128);
 let audioActive = false;
+// ENERGY + PHASE system
+let energy = 0; // 0-100
+let maxEnergy = 100;
+let phaseActive = false;
+let phaseTimer = 0;
+let phaseCooldown = 0;
+const phaseDuration = 0.5; // seconds
+const phaseCooldownTime = 6; // seconds
+let phaseGhostTrail = [];
+let dischargeActive = false;
+let dischargeTimer = 0;
+let dischargeRadius = 0;
+let dischargeDamage = 0;
 
 // ====== BOSS STATE ======
 let boss = null;
@@ -465,7 +497,7 @@ function updateBoss(dt) {
 
   // Collision: boss attacks vs signal
   for (let a of bossAttacks) {
-    if (!signal.isFragmented) {
+    if (!signal.isFragmented && !phaseActive) {
       const dx = signal.x - a.x, dy = signal.y - a.y;
       if (Math.sqrt(dx*dx + dy*dy) < signal.radius + a.radius) {
         // Fragment!
@@ -819,6 +851,7 @@ canvas.addEventListener('click', e => {
         n.absorbAnim = 1;
         score += 10 * (1 + combo * 0.1);
         health = Math.min(100, health + 8);
+        energy = Math.min(maxEnergy, energy + 8);
         combo++;
         comboTimer = 2;
         spawnParticles(n.x, n.y, '#00ff88', 20, 4, 0.8);
@@ -831,6 +864,7 @@ canvas.addEventListener('click', e => {
           if (Math.sqrt(bx*bx + by*by) < boss.radius * 2.5) {
             boss.hp -= 8;
             boss.hurtTimer = 0.3;
+            energy = Math.min(maxEnergy, energy + 5);
             spawnParticles(n.x, n.y, '#ff3366', 15, 3, 0.5);
             spawnParticles(boss.x + (Math.random()-0.5)*boss.radius, boss.y + (Math.random()-0.5)*boss.radius, '#ff3366', 8, 2, 0.4);
             score += 5;
@@ -852,6 +886,40 @@ canvas.addEventListener('click', e => {
     }
     spawnParticles(signal.x, signal.y, '#00ff88', 30, 5, 0.6);
     document.getElementById('frag-hint').style.opacity = '0';
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (gameState !== 'playing') return;
+  if (e.code === 'Shift' && !phaseActive && phaseCooldown <= 0) {
+    // PHASE SHIFT — brief invulnerability dash
+    phaseActive = true;
+    phaseTimer = phaseDuration;
+    phaseGhostTrail = [];
+    screenShake = 8;
+    flashColor = '#00ccff';
+    flashAlpha = 0.3;
+    spawnParticles(signal.x, signal.y, '#00ccff', 30, 5, 0.6);
+  }
+  if (e.code === 'Space' && !dischargeActive && energy >= 30) {
+    // DISCHARGE — energy blast
+    dischargeActive = true;
+    dischargeTimer = 0;
+    dischargeRadius = 0;
+    dischargeDamage = Math.min(energy, 100);
+    energy = 0;
+    flashColor = '#00ffff';
+    flashAlpha = 0.5;
+    screenShake = 15;
+    spawnParticles(signal.x, signal.y, '#00ccff', 50, 7, 0.8);
+    // Damage boss
+    if (boss && !boss.defeated) {
+      const dmg = Math.floor(dischargeDamage * 0.4);
+      boss.hp -= dmg;
+      boss.hurtTimer = 0.5;
+      spawnParticles(boss.x + (Math.random()-0.5)*boss.radius*2, boss.y + (Math.random()-0.5)*boss.radius*2, '#00ccff', 30, 5, 0.7);
+      score += dmg * 2;
+    }
   }
 });
 
@@ -883,6 +951,13 @@ function startGame() {
   bossAttacks = [];
   bossWarningTimer = 0;
   bossDrainTimer = 0;
+  energy = 0;
+  phaseActive = false;
+  phaseTimer = 0;
+  phaseCooldown = 0;
+  phaseGhostTrail = [];
+  dischargeActive = false;
+  dischargeTimer = 0;
   resetSignal();
   generateCircuit();
   if (!audioCtx) initAudio();
@@ -949,6 +1024,51 @@ function update(dt) {
   if (comboTimer > 0) {
     comboTimer -= dt;
     if (comboTimer <= 0) combo = 0;
+  }
+
+  // Phase shift update
+  if (phaseActive) {
+    phaseTimer -= dt;
+    phaseGhostTrail.push({ x: signal.x, y: signal.y, life: 0.4 });
+    if (phaseTimer <= 0) {
+      phaseActive = false;
+      phaseCooldown = phaseCooldownTime;
+    }
+  }
+  phaseGhostTrail = phaseGhostTrail.filter(t => { t.life -= dt; return t.life > 0; });
+  if (phaseCooldown > 0) phaseCooldown -= dt;
+
+  // Discharge update
+  if (dischargeActive) {
+    dischargeTimer += dt;
+    dischargeRadius = dischargeTimer * 600; // expand at 600px/s
+    // Destroy boss attacks within radius
+    for (let a of bossAttacks) {
+      const dx = a.x - signal.x, dy = a.y - signal.y;
+      if (Math.sqrt(dx*dx + dy*dy) < dischargeRadius) {
+        spawnParticles(a.x, a.y, '#00ccff', 15, 4, 0.5);
+        a.life = 0;
+      }
+    }
+    // Push and damage blocks
+    for (let b of blocks) {
+      const dx = b.x - signal.x, dy = b.y - signal.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < dischargeRadius && dist > 0) {
+        const force = (dischargeRadius - dist) / dischargeRadius * 8;
+        b.vx += (dx / dist) * force;
+        b.vy += (dy / dist) * force;
+      }
+    }
+    if (dischargeTimer > 1.5) {
+      dischargeActive = false;
+      dischargeRadius = 0;
+    }
+  }
+
+  // Energy drain (slow decay when not in use)
+  if (!dischargeActive && energy > 0) {
+    energy = Math.max(0, energy - 0.8 * dt);
   }
 
   // Health drain (corruption)
@@ -1020,7 +1140,7 @@ function update(dt) {
   blocks = blocks.filter(b => b.x > -100 && b.x < W + 100 && b.y > -100 && b.y < H + 100);
 
   // Collision: signal vs blocks
-  if (!signal.isFragmented) {
+  if (!signal.isFragmented && !phaseActive) {
     for (let b of blocks) {
       const dx = signal.x - b.x, dy = signal.y - b.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1110,6 +1230,22 @@ function updateUI() {
   if (health > 60) healthFill.style.background = 'linear-gradient(90deg, #00ff88, #00ffaa)';
   else if (health > 30) healthFill.style.background = 'linear-gradient(90deg, #D4A853, #ffcc66)';
   else healthFill.style.background = 'linear-gradient(90deg, #ff3366, #ff6699)';
+
+  // Energy bar
+  document.getElementById('energy-fill').style.width = `${energy}%`;
+  document.getElementById('energy-pct').textContent = `${Math.floor(energy)}%`;
+  const energyWrap = document.getElementById('energy-bar-wrap');
+  if (energy >= 30) energyWrap.classList.add('active');
+  else energyWrap.classList.remove('active');
+
+  // Phase cooldown bar
+  const phaseReady = phaseCooldown <= 0 && !phaseActive;
+  const phasePct = phaseActive ? (phaseTimer / phaseDuration) * 100 : (1 - phaseCooldown / phaseCooldownTime) * 100;
+  document.getElementById('phase-fill').style.width = `${Math.max(0, phasePct)}%`;
+  document.getElementById('phase-label').textContent = phaseActive ? 'PHASING' : (phaseReady ? 'READY' : 'PHASE');
+  const phaseWrap = document.getElementById('phase-cooldown-wrap');
+  if (phaseReady || phaseActive) phaseWrap.classList.add('active');
+  else phaseWrap.classList.remove('active');
 }
 
 // ====== DRAW ======
@@ -1262,20 +1398,65 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
+  // Phase ghost trail
+  for (let g of phaseGhostTrail) {
+    ctx.globalAlpha = g.life * 0.5;
+    ctx.strokeStyle = '#00ccff';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#00ccff';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, signal.radius * 0.8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // Discharge ring
+  if (dischargeActive && dischargeRadius > 0) {
+    const dAlpha = Math.max(0, 1 - dischargeTimer / 1.5);
+    ctx.strokeStyle = `rgba(0, 204, 255, ${dAlpha * 0.7})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#00ccff';
+    ctx.shadowBlur = 30;
+    ctx.beginPath();
+    ctx.arc(signal.x, signal.y, dischargeRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner ring
+    ctx.strokeStyle = `rgba(0, 255, 255, ${dAlpha * 0.4})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(signal.x, signal.y, dischargeRadius * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
   // Signal
   if (!signal.isFragmented) {
     const pulse = Math.sin(signal.pulsePhase) * 2;
+    const signalColor = phaseActive ? '#00ccff' : '#00ff88';
+    // Phase active — outer cyan ring
+    if (phaseActive) {
+      ctx.strokeStyle = '#00ccff';
+      ctx.shadowColor = '#00ccff';
+      ctx.shadowBlur = 40 + Math.sin(Date.now() * 0.02) * 15;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(signal.x, signal.y, signal.radius + 12 + Math.sin(Date.now() * 0.015) * 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // Outer glow
-    ctx.shadowColor = '#00ff88';
+    ctx.shadowColor = signalColor;
     ctx.shadowBlur = 25 + pulse * 5;
-    ctx.strokeStyle = '#00ff88';
+    ctx.strokeStyle = signalColor;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(signal.x, signal.y, signal.radius + pulse, 0, Math.PI * 2);
     ctx.stroke();
 
     // Inner core
-    ctx.fillStyle = '#00ff88';
+    ctx.fillStyle = signalColor;
     ctx.beginPath();
     ctx.arc(signal.x, signal.y, signal.radius * 0.5, 0, Math.PI * 2);
     ctx.fill();
@@ -1284,7 +1465,7 @@ function draw() {
     const nx = signal.vx !== 0 ? signal.vx / Math.sqrt(signal.vx*signal.vx + signal.vy*signal.vy) : 0;
     const ny = signal.vy !== 0 ? signal.vy / Math.sqrt(signal.vx*signal.vx + signal.vy*signal.vy) : 0;
     if (Math.abs(nx) + Math.abs(ny) > 0.1) {
-      ctx.strokeStyle = '#00ff88';
+      ctx.strokeStyle = signalColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(signal.x + nx * signal.radius * 0.3, signal.y + ny * signal.radius * 0.3);
@@ -1294,8 +1475,9 @@ function draw() {
 
     // Combo rings
     if (combo > 1) {
+      const ringColor = phaseActive ? '#00ccff' : '#D4A853';
       for (let c = 1; c <= Math.min(combo, 5); c++) {
-        ctx.strokeStyle = `rgba(212, 168, 83, ${0.5 - c * 0.08})`;
+        ctx.strokeStyle = phaseActive ? `rgba(0, 204, 255, ${0.5 - c * 0.08})` : `rgba(212, 168, 83, ${0.5 - c * 0.08})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(signal.x, signal.y, signal.radius + c * 10, 0, Math.PI * 2);
