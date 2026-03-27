@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIGNAL TRACE</title>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  overflow: hidden;
+  font-family: 'Rajdhani', sans-serif;
+  user-select: none;
+}
+canvas {
+  display: block;
+  position: fixed;
+  top: 0; left: 0;
+}
+#ui {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+#topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+}
+#score-display {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 22px;
+  color: #D4A853;
+  text-shadow: 0 0 20px #D4A85388;
+  letter-spacing: 2px;
+}
+#health-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#health-label {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 11px;
+  color: #00ff88;
+  letter-spacing: 2px;
+}
+#health-bar {
+  width: 200px;
+  height: 10px;
+  background: #1a1a1a;
+  border: 1px solid #00ff8844;
+  border-radius: 5px;
+  overflow: hidden;
+}
+#health-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #00ff88, #00ffaa);
+  box-shadow: 0 0 10px #00ff88;
+  transition: width 0.2s ease;
+}
+#signal-integrity {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 11px;
+  color: #00ff88;
+  letter-spacing: 1px;
+}
+#wave-display {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 14px;
+  color: #D4A853;
+  letter-spacing: 2px;
+  text-align: center;
+}
+#mode-indicator {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: #D4A85388;
+  letter-spacing: 1px;
+}
+#gameover {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85);
+  z-index: 100;
+  pointer-events: all;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+#gameover.active { display: flex; }
+#gameover h1 {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 48px;
+  color: #ff3366;
+  text-shadow: 0 0 40px #ff336688;
+  margin-bottom: 10px;
+  letter-spacing: 4px;
+}
+#gameover .subtitle {
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  color: #D4A85388;
+  margin-bottom: 30px;
+  letter-spacing: 1px;
+}
+#gameover .final-score {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 28px;
+  color: #D4A853;
+  text-shadow: 0 0 20px #D4A85366;
+  margin-bottom: 40px;
+}
+#restart-btn {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 14px;
+  color: #0a0a0a;
+  background: #00ff88;
+  border: none;
+  padding: 14px 40px;
+  cursor: pointer;
+  letter-spacing: 3px;
+  pointer-events: all;
+  box-shadow: 0 0 30px #00ff8866;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+#restart-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 50px #00ff88aa;
+}
+#start-screen {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: #0a0a0a;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+#start-screen h1 {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 52px;
+  color: #00ff88;
+  text-shadow: 0 0 40px #00ff8888, 0 0 80px #00ff8844;
+  letter-spacing: 6px;
+  margin-bottom: 10px;
+}
+#start-screen .tagline {
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  color: #D4A85388;
+  letter-spacing: 2px;
+  margin-bottom: 50px;
+}
+#start-btn {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 16px;
+  color: #0a0a0a;
+  background: #D4A853;
+  border: none;
+  padding: 16px 50px;
+  cursor: pointer;
+  letter-spacing: 4px;
+  box-shadow: 0 0 40px #D4A85366;
+  transition: transform 0.1s, box-shadow 0.1s;
+  margin-bottom: 20px;
+}
+#start-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 60px #D4A853aa;
+}
+#start-screen .hint {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: #ffffff33;
+  letter-spacing: 1px;
+}
+#glitch-overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+}
+.scanlines {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 4;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+}
+#frag-hint {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Syncopate', sans-serif;
+  font-size: 16px;
+  color: #ff3366;
+  text-shadow: 0 0 20px #ff3366;
+  letter-spacing: 3px;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div class="scanlines"></div>
+<div id="glitch-overlay"></div>
+
+<div id="ui">
+  <div id="topbar">
+    <div id="score-display">SCORE: 0</div>
+    <div id="wave-display">WAVE 1</div>
+    <div id="health-bar-wrap">
+      <span id="health-label">INTEGRITY</span>
+      <div id="health-bar"><div id="health-fill"></div></div>
+      <span id="signal-integrity">100%</span>
+    </div>
+  </div>
+  <div id="mode-indicator">MOUSE: MOVE SIGNAL | CLICK: ABSORB NODE</div>
+</div>
+
+<div id="start-screen">
+  <h1>SIGNAL TRACE</h1>
+  <p class="tagline">SURVIVE THE CORRUPTED CIRCUIT</p>
+  <button id="start-btn">INITIALIZE</button>
+  <p class="hint">MOUSE TO MOVE · CLICK TO ABSORB SIGNAL NODES · AVOID CORRUPTED DATA</p>
+</div>
+
+<div id="gameover">
+  <h1>SIGNAL LOST</h1>
+  <p class="subtitle">SIGNAL INTEGRITY COMPROMISED</p>
+  <div class="final-score" id="final-score-text">SCORE: 0</div>
+  <button id="restart-btn">REINITIALIZE</button>
+</div>
+
+<div id="frag-hint">CLICK TO REASSEMBLE</div>
+
+<script>
+// ====== CANVAS SETUP ======
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ====== GAME STATE ======
+let gameState = 'start'; // start, playing, dead
+let score = 0;
+let wave = 1;
+let health = 100;
+let glitchIntensity = 0;
+let combo = 0;
+let comboTimer = 0;
+let mouseX = W / 2, mouseY = H / 2;
+let lastTime = 0;
+let deltaTime = 0;
+let audioCtx = null;
+let analyser = null;
+let audioData = new Uint8Array(128);
+let audioActive = false;
+
+// ====== CIRCUIT BOARD BACKGROUND ======
+let circuitLines = [];
+let circuitNodes = [];
+
+function generateCircuit() {
+  circuitLines = [];
+  circuitNodes = [];
+  const spacing = 80;
+  // horizontal lines
+  for (let y = spacing; y < H; y += spacing) {
+    let x = 0;
+    while (x < W) {
+      const segLen = 60 + Math.random() * 120;
+      if (x + segLen < W) {
+        circuitLines.push({ x1: x, y1: y, x2: x + segLen, y2: y, bright: Math.random() < 0.1 });
+        // node at end
+        circuitNodes.push({ x: x + segLen, y, r: 2 + Math.random() * 2, bright: Math.random() < 0.2 });
+      }
+      x += segLen + Math.random() * 40;
+    }
+  }
+  // vertical lines
+  for (let x = spacing; x < W; x += spacing) {
+    let y = 0;
+    while (y < H) {
+      const segLen = 60 + Math.random() * 120;
+      if (y + segLen < H) {
+        circuitLines.push({ x1: x, y1: y, x2: x, y2: y + segLen, bright: Math.random() < 0.1 });
+        circuitNodes.push({ x, y: y + segLen, r: 2 + Math.random() * 2, bright: Math.random() < 0.2 });
+      }
+      y += segLen + Math.random() * 40;
+    }
+  }
+}
+
+// ====== SIGNAL CORE ======
+let signal = {
+  x: 0, y: 0,
+  vx: 0, vy: 0,
+  radius: 12,
+  fragments: [],
+  trail: [],
+  pulsePhase: 0,
+  isFragmented: false,
+  fragTimer: 0
+};
+
+function resetSignal() {
+  signal.x = W / 2;
+  signal.y = H / 2;
+  signal.vx = 0;
+  signal.vy = 0;
+  signal.fragments = [];
+  signal.trail = [];
+  signal.pulsePhase = 0;
+  signal.isFragmented = false;
+  signal.fragTimer = 0;
+}
+
+// ====== PARTICLES ======
+let particles = [];
+
+function spawnParticles(x, y, color, count, speed, life) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd = speed * (0.5 + Math.random() * 0.5);
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd,
+      life: life,
+      maxLife: life,
+      color,
+      r: 2 + Math.random() * 3
+    });
+  }
+}
+
+// ====== SIGNAL NODES ======
+let nodes = [];
+let nodeSpawnTimer = 0;
+
+function spawnNode() {
+  const margin = 60;
+  const type = Math.random() < 0.7 ? 'good' : 'bad';
+  nodes.push({
+    x: margin + Math.random() * (W - margin * 2),
+    y: margin + Math.random() * (H - margin * 2),
+    radius: 8 + Math.random() * 6,
+    type,
+    pulsePhase: Math.random() * Math.PI * 2,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: (Math.random() - 0.5) * 0.5,
+    absorbed: false,
+    absorbAnim: 0
+  });
+}
+
+// ====== CORRUPTED DATA BLOCKS ======
+let blocks = [];
+let blockSpawnTimer = 0;
+
+function spawnBlock() {
+  const side = Math.floor(Math.random() * 4);
+  const size = 20 + Math.random() * 30;
+  let x, y, vx, vy;
+  const speed = 1 + wave * 0.3 + Math.random() * 1.5;
+  if (side === 0) { x = -size; y = Math.random() * H; vx = speed; vy = (Math.random() - 0.5) * 0.5; }
+  else if (side === 1) { x = W + size; y = Math.random() * H; vx = -speed; vy = (Math.random() - 0.5) * 0.5; }
+  else if (side === 2) { x = Math.random() * W; y = -size; vx = (Math.random() - 0.5) * 0.5; vy = speed; }
+  else { x = Math.random() * W; y = H + size; vx = (Math.random() - 0.5) * 0.5; vy = -speed; }
+
+  blocks.push({
+    x, y, vx, vy, size,
+    rotation: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.05,
+    glitchPhase: Math.random() * Math.PI * 2,
+    vertices: 4 + Math.floor(Math.random() * 4)
+  });
+}
+
+// ====== EFFECTS ======
+let screenShake = 0;
+let flashColor = null;
+let flashAlpha = 0;
+let glitchSlices = [];
+
+// ====== AUDIO ======
+function initAudio() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    audioData = new Uint8Array(analyser.frequencyBinCount);
+    // Try to get mic
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      audioActive = true;
+    }).catch(() => {
+      audioActive = false;
+    });
+  } catch (e) {
+    audioActive = false;
+  }
+}
+
+// ====== INPUT ======
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
+canvas.addEventListener('click', e => {
+  if (gameState !== 'playing') return;
+  const cx = e.clientX, cy = e.clientY;
+
+  // Try to absorb nearby good node
+  let absorbed = false;
+  for (let n of nodes) {
+    if (!n.absorbed && n.type === 'good') {
+      const dx = n.x - cx, dy = n.y - cy;
+      if (Math.sqrt(dx*dx + dy*dy) < 50) {
+        n.absorbed = true;
+        n.absorbAnim = 1;
+        score += 10 * (1 + combo * 0.1);
+        health = Math.min(100, health + 8);
+        combo++;
+        comboTimer = 2;
+        spawnParticles(n.x, n.y, '#00ff88', 20, 4, 0.8);
+        flashColor = '#00ff88';
+        flashAlpha = 0.15;
+        absorbed = true;
+        break;
+      }
+    }
+  }
+
+  // If fragmented, click to reassemble
+  if (signal.isFragmented) {
+    signal.isFragmented = false;
+    signal.fragTimer = 0;
+    // Snap fragments back
+    for (let f of signal.fragments) {
+      f.x = signal.x + (Math.random() - 0.5) * 20;
+      f.y = signal.y + (Math.random() - 0.5) * 20;
+    }
+    spawnParticles(signal.x, signal.y, '#00ff88', 30, 5, 0.6);
+    document.getElementById('frag-hint').style.opacity = '0';
+  }
+});
+
+document.addEventById('start-btn').addEventListener('click', () => {
+  document.getElementById('start-screen').style.display = 'none';
+  startGame();
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  document.getElementById('gameover').classList.remove('active');
+  startGame();
+});
+
+function startGame() {
+  gameState = 'playing';
+  score = 0;
+  wave = 1;
+  health = 100;
+  glitchIntensity = 0;
+  combo = 0;
+  comboTimer = 0;
+  nodes = [];
+  blocks = [];
+  particles = [];
+  nodeSpawnTimer = 0;
+  blockSpawnTimer = 0;
+  signal.fragments = [];
+  resetSignal();
+  generateCircuit();
+  if (!audioCtx) initAudio();
+  updateUI();
+}
+
+function gameOver() {
+  gameState = 'dead';
+  document.getElementById('gameover').classList.add('active');
+  document.getElementById('final-score-text').textContent = `SCORE: ${Math.floor(score)}`;
+  spawnParticles(signal.x, signal.y, '#ff3366', 60, 6, 1.2);
+}
+
+// ====== UPDATE ======
+function update(dt) {
+  if (gameState !== 'playing') return;
+
+  // Audio analysis
+  if (analyser && audioActive) {
+    analyser.getByteFrequencyData(audioData);
+  }
+
+  const audioLevel = audioActive ? audioData.reduce((a, b) => a + b, 0) / audioData.length / 255 : 0;
+
+  // Signal movement (follows mouse with inertia)
+  const ease = 0.08;
+  signal.vx += (mouseX - signal.x) * ease * dt * 60;
+  signal.vy += (mouseY - signal.y) * ease * dt * 60;
+  signal.vx *= 0.88;
+  signal.vy *= 0.88;
+  signal.x += signal.vx * dt * 60;
+  signal.y += signal.vy * dt * 60;
+
+  // Trail
+  signal.pulsePhase += dt * 3;
+  if (Math.random() < 0.3) {
+    signal.trail.push({ x: signal.x, y: signal.y, life: 1 });
+  }
+  signal.trail = signal.trail.filter(t => {
+    t.life -= dt * 2;
+    return t.life > 0;
+  });
+
+  // Fragment movement
+  if (signal.isFragmented) {
+    signal.fragTimer += dt;
+    for (let f of signal.fragments) {
+      f.x += f.vx * dt * 60;
+      f.y += f.vy * dt * 60;
+      f.vx *= 0.95;
+      f.vy *= 0.95;
+    }
+    // After 3s, game over
+    if (signal.fragTimer > 3) {
+      gameOver();
+      return;
+    }
+    document.getElementById('frag-hint').style.opacity = (Math.sin(signal.fragTimer * 6) > 0) ? '1' : '0.3';
+  }
+
+  // Combo decay
+  if (comboTimer > 0) {
+    comboTimer -= dt;
+    if (comboTimer <= 0) combo = 0;
+  }
+
+  // Health drain (corruption)
+  const drainRate = 0.3 + wave * 0.15 + (audioLevel > 0.3 ? -5 : 0.5);
+  health -= drainRate * dt;
+  health = Math.max(0, Math.min(100, health));
+  glitchIntensity = Math.max(0, 1 - health / 100) * 0.5;
+
+  if (health <= 0) {
+    gameOver();
+    return;
+  }
+
+  // Wave progression
+  const scoreForWave = 500 * wave;
+  if (score >= scoreForWave) {
+    wave++;
+    health = Math.min(100, health + 20);
+    spawnParticles(signal.x, signal.y, '#D4A853', 40, 5, 1);
+    flashColor = '#D4A853';
+    flashAlpha = 0.3;
+    screenShake = 10;
+  }
+
+  // Node spawning
+  nodeSpawnTimer -= dt;
+  if (nodeSpawnTimer <= 0) {
+    spawnNode();
+    nodeSpawnTimer = 1.5 - Math.min(wave * 0.1, 0.8);
+  }
+
+  // Update nodes
+  for (let n of nodes) {
+    n.pulsePhase += dt * 3;
+    n.x += n.vx * dt * 60;
+    n.y += n.vy * dt * 60;
+    // Bounce off edges
+    if (n.x < 20 || n.x > W - 20) n.vx *= -1;
+    if (n.y < 20 || n.y > H - 20) n.vy *= -1;
+    n.x = Math.max(10, Math.min(W - 10, n.x));
+    n.y = Math.max(10, Math.min(H - 10, n.y));
+
+    if (n.absorbed) {
+      n.absorbAnim -= dt * 3;
+    }
+  }
+  nodes = nodes.filter(n => !n.absorbed || n.absorbAnim > 0);
+
+  // Block spawning
+  blockSpawnTimer -= dt;
+  const blockInterval = Math.max(0.4, 2 - wave * 0.15);
+  if (blockSpawnTimer <= 0) {
+    spawnBlock();
+    blockSpawnTimer = blockInterval;
+  }
+
+  // Update blocks
+  for (let b of blocks) {
+    b.x += b.vx * dt * 60;
+    b.y += b.vy * dt * 60;
+    b.rotation += b.rotSpeed * dt * 60;
+    b.glitchPhase += dt * 5;
+  }
+  // Remove off-screen blocks
+  blocks = blocks.filter(b => b.x > -100 && b.x < W + 100 && b.y > -100 && b.y < H + 100);
+
+  // Collision: signal vs blocks
+  if (!signal.isFragmented) {
+    for (let b of blocks) {
+      const dx = signal.x - b.x, dy = signal.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < signal.radius + b.size * 0.6) {
+        // Fragment!
+        health -= 25;
+        combo = 0;
+        screenShake = 15;
+        flashColor = '#ff3366';
+        flashAlpha = 0.4;
+        spawnParticles(signal.x, signal.y, '#ff3366', 30, 5, 0.8);
+
+        // Break signal into fragments
+        const fragCount = 5 + Math.floor(Math.random() * 4);
+        signal.fragments = [];
+        for (let i = 0; i < fragCount; i++) {
+          const angle = (i / fragCount) * Math.PI * 2 + Math.random() * 0.5;
+          const speed = 1 + Math.random() * 2;
+          signal.fragments.push({
+            x: signal.x + Math.cos(angle) * 15,
+            y: signal.y + Math.sin(angle) * 15,
+            vx: Math.cos(angle) * speed + signal.vx * 0.3,
+            vy: Math.sin(angle) * speed + signal.vy * 0.3,
+            r: 4 + Math.random() * 4,
+            pulse: Math.random() * Math.PI * 2
+          });
+        }
+        signal.isFragmented = true;
+        signal.fragTimer = 0;
+        document.getElementById('frag-hint').style.opacity = '1';
+        break;
+      }
+    }
+  }
+
+  // Collision: signal fragments vs good nodes (auto-absorb)
+  if (signal.isFragmented) {
+    for (let f of signal.fragments) {
+      for (let n of nodes) {
+        if (!n.absorbed && n.type === 'good') {
+          const dx = f.x - n.x, dy = f.y - n.y;
+          if (Math.sqrt(dx*dx + dy*dy) < 30) {
+            n.absorbed = true;
+            n.absorbAnim = 1;
+            score += 5;
+            spawnParticles(n.x, n.y, '#00ff88', 15, 3, 0.5);
+          }
+        }
+      }
+    }
+  }
+
+  // Particles
+  for (let p of particles) {
+    p.x += p.vx * dt * 60;
+    p.y += p.vy * dt * 60;
+    p.vx *= 0.97;
+    p.vy *= 0.97;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+
+  // Screen effects
+  if (screenShake > 0) screenShake *= 0.85;
+  if (flashAlpha > 0) flashAlpha -= dt * 2;
+  if (Math.random() < glitchIntensity * 0.3) {
+    glitchSlices.push({
+      y: Math.random() * H,
+      h: 5 + Math.random() * 20,
+      offset: (Math.random() - 0.5) * 20,
+      life: 0.1 + Math.random() * 0.2
+    });
+  }
+  glitchSlices = glitchSlices.filter(s => { s.life -= dt; return s.life > 0; });
+
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('score-display').textContent = `SCORE: ${Math.floor(score)}`;
+  document.getElementById('health-fill').style.width = `${health}%`;
+  document.getElementById('signal-integrity').textContent = `${Math.floor(health)}%`;
+  document.getElementById('wave-display').textContent = `WAVE ${wave}`;
+
+  const healthFill = document.getElementById('health-fill');
+  if (health > 60) healthFill.style.background = 'linear-gradient(90deg, #00ff88, #00ffaa)';
+  else if (health > 30) healthFill.style.background = 'linear-gradient(90deg, #D4A853, #ffcc66)';
+  else healthFill.style.background = 'linear-gradient(90deg, #ff3366, #ff6699)';
+}
+
+// ====== DRAW ======
+function draw() {
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Screen shake offset
+  let sx = 0, sy = 0;
+  if (screenShake > 0.5) {
+    sx = (Math.random() - 0.5) * screenShake;
+    sy = (Math.random() - 0.5) * screenShake;
+  }
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // Circuit background
+  const audioLevel = audioActive ? audioData.reduce((a, b) => a + b, 0) / audioData.length / 255 : 0;
+  const circuitPulse = Math.sin(Date.now() * 0.001) * 0.3 + 0.7;
+  ctx.strokeStyle = `rgba(20, 80, 40, ${0.15 * circuitPulse + audioLevel * 0.1})`;
+  ctx.lineWidth = 1;
+  for (let line of circuitLines) {
+    ctx.beginPath();
+    ctx.moveTo(line.x, line.y);
+    ctx.lineTo(line.x2, line.y2);
+    if (line.bright) {
+      ctx.strokeStyle = `rgba(0, 255, 136, ${0.3 * circuitPulse})`;
+      ctx.lineWidth = 1.5;
+    } else {
+      ctx.strokeStyle = `rgba(20, 80, 40, ${0.12 * circuitPulse})`;
+      ctx.lineWidth = 1;
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#004422';
+  for (let node of circuitNodes) {
+    if (node.bright) {
+      ctx.fillStyle = `rgba(0, 255, 136, ${0.5 * circuitPulse})`;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Flash
+  if (flashAlpha > 0 && flashColor) {
+    ctx.fillStyle = flashColor;
+    ctx.globalAlpha = flashAlpha;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // Blocks
+  for (let b of blocks) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rotation);
+
+    // Glitch offset
+    const gx = Math.sin(b.glitchPhase) * 3;
+    ctx.translate(gx, 0);
+
+    ctx.strokeStyle = '#ff3366';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#ff3366';
+    ctx.shadowBlur = 10 + Math.sin(b.glitchPhase * 2) * 5;
+    ctx.beginPath();
+    for (let i = 0; i < b.vertices; i++) {
+      const angle = (i / b.vertices) * Math.PI * 2;
+      const r = b.size * 0.5;
+      const px = Math.cos(angle) * r, py = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Inner glitch lines
+    ctx.strokeStyle = '#ff336644';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-b.size * 0.3, 0);
+    ctx.lineTo(b.size * 0.3, 0);
+    ctx.moveTo(0, -b.size * 0.3);
+    ctx.lineTo(0, b.size * 0.3);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Nodes
+  for (let n of nodes) {
+    if (n.absorbed) {
+      ctx.globalAlpha = n.absorbAnim;
+    }
+    const pulse = Math.sin(n.pulsePhase) * 0.2 + 1;
+    const r = n.radius * pulse;
+
+    if (n.type === 'good') {
+      ctx.strokeStyle = '#00ff88';
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 15 + Math.sin(n.pulsePhase * 2) * 8;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner dot
+      ctx.fillStyle = '#00ff8888';
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glow ring
+      ctx.strokeStyle = '#00ff8833';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // Bad node — red corrupted
+      ctx.strokeStyle = '#ff3366';
+      ctx.shadowColor = '#ff3366';
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 1.2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = '#ff336666';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  // Signal trail
+  for (let t of signal.trail) {
+    ctx.globalAlpha = t.life * 0.4;
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, signal.radius * t.life * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Signal
+  if (!signal.isFragmented) {
+    const pulse = Math.sin(signal.pulsePhase) * 2;
+    // Outer glow
+    ctx.shadowColor = '#00ff88';
+    ctx.shadowBlur = 25 + pulse * 5;
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(signal.x, signal.y, signal.radius + pulse, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner core
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath();
+    ctx.arc(signal.x, signal.y, signal.radius * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Direction indicator
+    const nx = signal.vx !== 0 ? signal.vx / Math.sqrt(signal.vx*signal.vx + signal.vy*signal.vy) : 0;
+    const ny = signal.vy !== 0 ? signal.vy / Math.sqrt(signal.vx*signal.vx + signal.vy*signal.vy) : 0;
+    if (Math.abs(nx) + Math.abs(ny) > 0.1) {
+      ctx.strokeStyle = '#00ff88';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(signal.x + nx * signal.radius * 0.3, signal.y + ny * signal.radius * 0.3);
+      ctx.lineTo(signal.x + nx * (signal.radius + 8 + pulse), signal.y + ny * (signal.radius + 8 + pulse));
+      ctx.stroke();
+    }
+
+    // Combo rings
+    if (combo > 1) {
+      for (let c = 1; c <= Math.min(combo, 5); c++) {
+        ctx.strokeStyle = `rgba(212, 168, 83, ${0.5 - c * 0.08})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(signal.x, signal.y, signal.radius + c * 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.shadowBlur = 0;
+  } else {
+    // Fragmented signal
+    for (let f of signal.fragments) {
+      f.pulse = (f.pulse || 0) + 0.1;
+      const fp = Math.sin(f.pulse) * 2;
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 15;
+      ctx.fillStyle = '#00ff88';
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r + fp, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#00ff8888';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r * 1.8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // Connection lines between nearby fragments
+    for (let i = 0; i < signal.fragments.length; i++) {
+      for (let j = i + 1; j < signal.fragments.length; j++) {
+        const dx = signal.fragments[i].x - signal.fragments[j].x;
+        const dy = signal.fragments[i].y - signal.fragments[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 80) {
+          ctx.strokeStyle = `rgba(0, 255, 136, ${(1 - dist/80) * 0.4})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(signal.fragments[i].x, signal.fragments[i].y);
+          ctx.lineTo(signal.fragments[j].x, signal.fragments[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // Particles
+  for (let p of particles) {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * (p.life / p.maxLife), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+
+  // Glitch slices
+  for (let s of glitchSlices) {
+    ctx.save();
+    ctx.translate(s.offset, 0);
+    ctx.fillStyle = `rgba(255, 51, 102, 0.1)`;
+    ctx.fillRect(0, s.y, W, s.h);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// ====== GAME LOOP ======
+function loop(ts) {
+  deltaTime = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  update(deltaTime);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(ts => {
+  lastTime = ts;
+  loop(ts);
+});
+</script>
+</body>
+</html>
