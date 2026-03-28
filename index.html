@@ -366,7 +366,7 @@ let chromaIntensity = 0;
 // ====== MIRROR ECHO ======
 let echo = null; // { active, timer, duration, posHistory[], cooldown, cooldownMax }
 const echoDuration = 4; // seconds
-const echoCooldown = 12; // seconds
+let echoCooldown = 12; // seconds
 const echoHistoryLen = 120; // 2s of history at 60fps
 let echoPosHistory = [];
 
