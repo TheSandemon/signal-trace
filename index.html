@@ -276,8 +276,15 @@ canvas {
         <div id="overdrive-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#ff3366,#ff6699); box-shadow:0 0 8px #ff336688; transition:width 0.1s;"></div>
       </div>
     </div>
+    <div id="echo-wrap" style="position:absolute; left:24px; top:102px; display:flex; align-items:center; gap:8px; opacity:0.7;">
+      <span id="echo-label" style="font-family:'Syncopate',sans-serif; font-size:10px; color:#cc44ff; letter-spacing:2px;">ECHO</span>
+      <div id="echo-bar" style="width:100px; height:8px; background:#1a1a1a; border:1px solid #cc44ff44; border-radius:4px; overflow:hidden;">
+        <div id="echo-fill" style="height:100%; width:100%; background:linear-gradient(90deg,#cc44ff,#ee88ff); box-shadow:0 0 8px #cc44ff88; transition:width 0.1s;"></div>
+      </div>
+      <span id="echo-status" style="font-family:'Space Mono',monospace; font-size:10px; color:#cc44ff88; letter-spacing:1px;">READY</span>
+    </div>
   </div>
-  <div id="mode-indicator">MOUSE: MOVE | CLICK: ABSORB | SHIFT: PHASE SHIFT | SPACE: DISCHARGE | E: OVERDRIVE</div>
+  <div id="mode-indicator">MOUSE: MOVE | CLICK: ABSORB | SHIFT: PHASE SHIFT | SPACE: DISCHARGE | E: OVERDRIVE | Q: ECHO</div>
 </div>
 
 <div id="start-screen">
@@ -355,6 +362,13 @@ let riftZoneTimer = 0;
 
 // CHROMATIC ABERRATION
 let chromaIntensity = 0;
+
+// ====== MIRROR ECHO ======
+let echo = null; // { active, timer, duration, posHistory[], cooldown, cooldownMax }
+const echoDuration = 4; // seconds
+const echoCooldown = 12; // seconds
+const echoHistoryLen = 120; // 2s of history at 60fps
+let echoPosHistory = [];
 
 // ====== BOSS STATE ======
 let boss = null;
@@ -1171,6 +1185,21 @@ document.addEventListener('keydown', e => {
       score += dmg * 2;
     }
   }
+  if (e.code === 'KeyQ' && !echo && echoCooldown <= 0) {
+    // MIRROR ECHO — ghost mirrors your past movements, absorbs nodes, deflects attacks
+    echoPosHistory = [];
+    echo = {
+      active: true,
+      timer: echoDuration,
+      x: signal.x,
+      y: signal.y,
+      pulsePhase: 0
+    };
+    screenShake = 6;
+    flashColor = '#cc44ff';
+    flashAlpha = 0.25;
+    spawnParticles(signal.x, signal.y, '#cc44ff', 25, 4, 0.6);
+  }
 });
 
 document.getElementById('start-btn').addEventListener('click', () => {
@@ -1215,6 +1244,9 @@ function startGame() {
   comboPopups = [];
   chainLinks = [];
   chromaIntensity = 0;
+  echo = null;
+  echoPosHistory = [];
+  echoCooldown = 0;
   resetSignal();
   generateCircuit();
   if (!audioCtx) initAudio();
@@ -1259,6 +1291,68 @@ function update(dt) {
     t.life -= dt * 2;
     return t.life > 0;
   });
+
+  // ====== MIRROR ECHO: Track position history ======
+  if (!echo) {
+    echoPosHistory.push({ x: signal.x, y: signal.y });
+    if (echoPosHistory.length > echoHistoryLen) echoPosHistory.shift();
+  } else {
+    // Echo is active — still track history but also decay echo
+    echo.timer -= dt;
+    if (echo.timer <= 0) {
+      // Echo expires — spawn fade-out particles
+      const ex = echo.x, ey = echo.y;
+      spawnParticles(ex, ey, '#cc44ff', 20, 3, 0.6);
+      echo = null;
+      echoPosHistory = [];
+    }
+  }
+
+  // ====== ECHO: Node absorption ======
+  if (echo && echo.timer > 0) {
+    // Echo mirrors position from 2 seconds ago
+    const histIdx = Math.max(0, Math.floor((echo.timer / echoDuration) * echoHistoryLen));
+    const histPos = echoPosHistory[Math.min(histIdx, echoPosHistory.length - 1)];
+    if (histPos) {
+      echo.x = histPos.x;
+      echo.y = histPos.y;
+    }
+    // Check echo node absorption
+    for (let n of nodes) {
+      if (!n.absorbed && n.type === 'good') {
+        const dx = n.x - echo.x, dy = n.y - echo.y;
+        if (Math.sqrt(dx*dx + dy*dy) < 30) {
+          n.absorbed = true;
+          const bonus = Math.floor((echo.timer / echoDuration) * 50);
+          score += (10 + bonus) * (overdriveActive ? 2 : 1);
+          combo = Math.min(combo + 1, 20);
+          comboTimer = Math.max(comboTimer, 1.5);
+          spawnParticles(n.x, n.y, '#cc44ff', 8, 3, 0.4);
+        }
+      }
+    }
+    // Echo deflects boss attacks
+    for (let a of bossAttacks) {
+      if (a.type !== 'laser') {
+        const dx = a.x - echo.x, dy = a.y - echo.y;
+        if (Math.sqrt(dx*dx + dy*dy) < 25) {
+          // Deflect!
+          const angle = Math.atan2(a.vy, a.vx) + Math.PI;
+          a.vx = Math.cos(angle) * (Math.sqrt(a.vx*a.vx + a.vy*a.vy) * 1.2);
+          a.vy = Math.sin(angle) * (Math.sqrt(a.vx*a.vx + a.vy*a.vy) * 1.2);
+          a.life = Math.min(a.life + 1, a.life + 2);
+          spawnParticles(echo.x, echo.y, '#cc44ff', 8, 4, 0.3);
+          screenShake = Math.max(screenShake, 4);
+        }
+      }
+    }
+  }
+
+  // Echo cooldown
+  if (!echo) {
+    echoCooldown -= dt;
+    if (echoCooldown < 0) echoCooldown = 0;
+  }
 
   // Fragment movement
   if (signal.isFragmented) {
@@ -1578,6 +1672,26 @@ function updateUI() {
     document.getElementById('score-display').style.color = '#D4A853';
     document.getElementById('score-display').style.textShadow = '0 0 20px #D4A85388';
   }
+
+  // Echo bar
+  const echoWrap = document.getElementById('echo-wrap');
+  if (echo) {
+    echoWrap.style.opacity = '1';
+    document.getElementById('echo-fill').style.width = `${(echo.timer / echoDuration) * 100}%`;
+    document.getElementById('echo-status').textContent = `${echo.timer.toFixed(1)}s`;
+    document.getElementById('echo-status').style.color = '#cc44ff';
+  } else if (echoCooldown > 0) {
+    echoWrap.style.opacity = '0.7';
+    const cdPct = 1 - echoCooldown / echoCooldownTime;
+    document.getElementById('echo-fill').style.width = `${Math.max(0, cdPct) * 100}%`;
+    document.getElementById('echo-status').textContent = 'CHARGING';
+    document.getElementById('echo-status').style.color = '#cc44ff88';
+  } else {
+    echoWrap.style.opacity = '0.7';
+    document.getElementById('echo-fill').style.width = '100%';
+    document.getElementById('echo-status').textContent = 'READY';
+    document.getElementById('echo-status').style.color = '#cc44ff';
+  }
 }
 
 // ====== DRAW ======
@@ -1763,6 +1877,53 @@ function draw() {
     ctx.arc(signal.x, signal.y, dischargeRadius * 0.7, 0, Math.PI * 2);
     ctx.stroke();
     ctx.shadowBlur = 0;
+  }
+
+  // ====== MIRROR ECHO rendering ======
+  if (echo) {
+    const ep = echo.timer / echoDuration; // 1→0 as echo fades
+    const echoPulse = Math.sin(Date.now() * 0.01) * 2;
+    const echoAlpha = ep * 0.7;
+    // Echo trail — draw fading ghost circles
+    for (let i = 0; i < 5; i++) {
+      const t = i / 5;
+      const trailAlpha = echoAlpha * (1 - t) * 0.4;
+      const trailSize = (signal.radius + echoPulse) * (1 - t * 0.3);
+      ctx.strokeStyle = `rgba(204, 68, 255, ${trailAlpha})`;
+      ctx.lineWidth = 1;
+      ctx.shadowColor = '#cc44ff';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(echo.x, echo.y, trailSize, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // Main echo body
+    ctx.shadowColor = '#cc44ff';
+    ctx.shadowBlur = 30 + Math.sin(Date.now() * 0.015) * 10;
+    ctx.strokeStyle = `rgba(204, 68, 255, ${echoAlpha})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.arc(echo.x, echo.y, signal.radius + 8 + echoPulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Echo core
+    ctx.fillStyle = `rgba(204, 68, 255, ${echoAlpha * 0.6})`;
+    ctx.beginPath();
+    ctx.arc(echo.x, echo.y, signal.radius * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Echo timer ring — shrinks as time runs out
+    ctx.strokeStyle = `rgba(238, 136, 255, ${echoAlpha * 0.5})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(echo.x, echo.y, signal.radius + 16 + echoPulse, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * ep);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // ECHO label
+    ctx.font = '9px Syncopate, monospace';
+    ctx.fillStyle = `rgba(204, 68, 255, ${echoAlpha})`;
+    ctx.textAlign = 'center';
+    ctx.fillText('ECHO', echo.x, echo.y - signal.radius - 20 - echoPulse);
   }
 
   // Signal
